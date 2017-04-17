@@ -1,0 +1,573 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Refined Types for Validated Configurations</title>
+    <link rel="stylesheet" href="https://d1azc1qln24ryf.cloudfront.net/114779/Socicon/style-cf.css?aovs">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Sans:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body {
+        font-family: 'Droid Sans';
+      }
+
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+
+      a {
+        color: #65a9b6;
+        text-decoration-skip: ink;
+        -webkit-text-decoration-skip: ink;
+      }
+
+      .remark-code, .remark-inline-code {
+        background: #2b2b2b !important;
+        font-family: 'Ubuntu Mono';
+        font-size: 100%;
+      }
+
+      .remark-container {
+        background-color: #2b2b2b;
+      }
+
+      .remark-slide-content {
+        background-color: #2b2b2b;
+        color: #f3f3f3;
+        font-size: 22px;
+      }
+
+      .remark-slide-scaler {
+        box-shadow: none;
+      }
+
+      .vertical-align-middle * {
+        vertical-align: middle;
+      }
+    </style>
+    <script src="https://use.fontawesome.com/3729cac000.js"></script>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Refined Types for Validated Configurations
+
+## Viktor Lövgren
+
+<span class="vertical-align-middle">
+  <i class="socicon-github"></i> [@vlovgr](https://github.com/vlovgr)
+  <span>&nbsp;/&nbsp;</span>
+  <i class="socicon-twitter"></i> [@vlovgr](https://twitter.com/vlovgr)
+</span>
+
+---
+
+class: center, middle
+
+<img src="images/ovo.svg" width="50%"></img>
+
+<span class="vertical-align-middle">
+  <i class="fa fa-globe" aria-hidden="true"></i> [tech.ovoenergy.com](http://tech.ovoenergy.com)
+</span>
+
+<span class="vertical-align-middle">
+  <i class="fa fa-twitter" aria-hidden="true"></i> [@OVOTechTeam](https://twitter.com/ovotechteam)
+</span>
+
+---
+
+# This talk was compiled with [tut](https://github.com/tpolecat/tut)
+
+```tut:silent
+import com.typesafe.config.ConfigValueFactory.fromAnyRef
+import com.typesafe.config.{Config, ConfigFactory}
+import eu.timepit.refined.api.{Refined, RefType, Validate}
+import eu.timepit.refined.auto._
+import eu.timepit.refined.boolean.And
+import eu.timepit.refined.collection.NonEmpty
+import eu.timepit.refined.numeric.{Greater, Interval, Positive}
+import eu.timepit.refined.pureconfig._
+import eu.timepit.refined.refineV
+import eu.timepit.refined.types.numeric.PosInt
+import eu.timepit.refined.types.string.NonEmptyString
+import eu.timepit.refined.W
+import java.net.ServerSocket
+import scala.util.Try
+
+def show[T](t: T): Unit =
+  pprint.pprintln(t, width = 70)
+```
+
+---
+
+# Why do we need configurations?
+
+* Use the same binary in multiple environments
+
+* Avoiding re-compile whenever settings change
+
+* Keep secrets outside of version control
+
+Bottom line: often necessary
+
+---
+
+class: center, middle
+
+# Configurations:
+# What are some of the difficulties,<br/>and what can be done about them
+
+---
+
+# Why do we use configuration files?
+
+* Change and override settings without re-compile
+
+<br/>
+
+Configuration library then helps with:
+
+* loading/overriding values from properties and environment variables
+
+* reusing and referencing across parts of your configuration
+
+* merging and loading from files, URIs, and class path
+
+* handling type conversions (`String => T`)
+
+---
+
+# Example: [Typesafe Config](https://github.com/typesafehub/config)
+
+```tut:silent
+final case class Settings(config: Config) {
+  object http {
+    def apiKey = config.getString("http.api-key")
+    def timeoutSeconds = config.getInt("http.timeout-seconds")
+    def port = config.getInt("http.port")
+  }
+}
+
+val config =
+  ConfigFactory.parseString(
+    """
+      |http {
+      |  api-key = ${?API_KEY}
+      |  timeout-seconds = 10
+      |  port = 989
+      |}
+    """.stripMargin
+  ).resolve()
+
+val settings = Settings(config)
+```
+
+---
+
+# What's not so good here?
+
+```tut:book:fail
+settings.http.apiKey
+```
+
+---
+
+# What's not so good here?
+
+```tut:silent
+val invalidConfig =
+  config.
+    withValue("http.api-key", fromAnyRef("")).
+    withValue("http.timeout-seconds", fromAnyRef(-1))
+
+val settings = Settings(invalidConfig)
+```
+
+```tut:book
+show(settings.http.apiKey) // API key should not be empty
+show(settings.http.timeoutSeconds) // Should be positive
+show(settings.http.port) // Ports 0 to 1023 are system ports
+```
+
+---
+
+# What's difficult with configurations?
+
+* Often involves writing boilerplate code
+
+* Tedious to test, rarely gets tested
+
+* Almost never gets validated
+
+* Mistakes can lead to disastrous results
+
+---
+
+# How should configurations be like?
+
+* No boilerplate for declaring or loading
+
+* Validated at compile-time or during startup
+
+* Validation encoded as part of the types
+
+* Secrets never touch persistent storage
+
+---
+
+# Eliminating boilerplate: [PureConfig](https://github.com/pureconfig/pureconfig)
+
+```tut:silent
+final case class HttpSettings(
+  apiKey: String,
+  timeoutSeconds: Int,
+  port: Int
+)
+
+final case class Settings(http: HttpSettings)
+
+val settings = pureconfig.loadConfig[Settings](config)
+```
+```tut:book
+show(settings)
+```
+
+---
+
+# What's still not so good here?
+
+```tut:silent
+val settings = pureconfig.loadConfig[Settings](invalidConfig)
+```
+
+```tut:book
+show(settings)
+
+show(settings.map(_.http.apiKey)) // API key should not be empty
+
+show(settings.map(_.http.timeoutSeconds)) // Should be positive
+
+show(settings.map(_.http.port)) // Ports 0 to 1023 are system ports
+```
+
+---
+
+# Encoding validation: [refined](https://github.com/fthomas/refined)
+
+```tut:silent
+// type NonEmptyString = String Refined NonEmpty
+// type PosInt = Int Refined Positive
+
+final case class HttpSettings(
+  apiKey: NonEmptyString,
+  timeoutSeconds: PosInt,
+  port: Int Refined Greater[W.`1023`.T]
+)
+
+final case class Settings(http: HttpSettings)
+
+val settings = pureconfig.loadConfig[Settings](config)
+```
+
+---
+
+# Encoding validation: [refined](https://github.com/fthomas/refined)
+
+```tut:book
+show(settings)
+```
+
+---
+
+# Can we do better?
+
+* Actually, port numbers are between 0 and 65535 (inclusive)
+
+```tut:silent
+type NonSystemPortNumber =
+  Int Refined Interval.Closed[W.`1024`.T, W.`65535`.T]
+```
+
+---
+
+# Can we do even better?
+
+* What about clashing ports?
+
+* What if we allow impure functions?
+
+```tut:silent
+final case class OpenPort()
+
+implicit val openPortValidate: Validate.Plain[Int, OpenPort] =
+  Validate.fromPartial(new ServerSocket(_).close(), "OpenPort", OpenPort())
+```
+
+```tut:book
+show(refineV[OpenPort](989))
+show(refineV[OpenPort](10000))
+show(refineV[OpenPort](65536))
+```
+
+---
+
+# Impurity means we need to be careful
+
+* We get compile-time validation from refined using macros
+
+* Means we might do the open port check at compile-time
+
+```tut:silent
+final case class HttpSettings(
+  apiKey: NonEmptyString,
+  timeoutSeconds: PosInt,
+  port: Int Refined OpenPort
+)
+```
+
+```tut:book:fail
+HttpSettings(
+  apiKey = "y2UX83yLeoGudKMZv9vb",
+  timeoutSeconds = 10,
+  port = 989
+)
+```
+
+---
+
+# Can we improve compile-time safety?
+
+* Do you really need to use configuration files?
+
+* What about writing your configurations in Scala?
+
+* We should not store any secrets in source code
+
+  * Store configuration code elsewhere, later compile with your application
+
+  * Alternatively, load the minimum necessary from the environment
+---
+
+# A pure Scala configuration
+
+```tut:book
+final case class HttpSettings(
+  apiKey: NonEmptyString,
+  timeoutSeconds: PosInt,
+  port: NonSystemPortNumber
+)
+
+val settings =
+  HttpSettings(
+    apiKey = "y2UX83yLeoGudKMZv9vb",
+    timeoutSeconds = 10,
+    port = 10000
+  )
+```
+
+<br/>
+<br/>
+
+\* Assuming single environment, no secrets
+
+---
+
+# Loading values from the environment
+
+Typically means we have to deal with:
+
+* supporting different configuration sources
+
+* converting from String to different types
+
+* handle errors and accumulate them
+
+* somehow manage multiple environments
+
+* integrate with libraries like refined
+
+---
+
+class: center, middle
+
+<img src="images/ciris.svg" width="20%"></img>
+
+<h1 style="margin-bottom: 0;">Ciris</h1>
+<h2 style="margin-top: 0;"><a href="https://cir.is">https://cir.is</a></h2>
+
+---
+
+# What is Ciris about?
+
+* Put as much as possible of your configurations in Scala
+
+* Load only the necessary values (secrets, environment, &hellip;)
+
+* Encode validation by using appropriate data types
+
+* Deals with error handling and error accumulation
+
+* Supports loading values from different sources
+
+* Dependency-free core, modules for library integrations
+
+---
+
+# Loading the same configuration
+
+```tut:silent
+import ciris._
+import ciris.refined._
+
+val settings =
+  loadConfig(
+    env[NonEmptyString]("API_KEY"), // Reads environment variable API_KEY
+    prop[NonSystemPortNumber]("http.port") // Reads system property http.port
+  ) { (apiKey, port) => HttpSettings(apiKey, 10, port) }
+```
+
+```tut:book
+show(settings.left.map(_.messages))
+```
+
+---
+
+# Dealing with multiple environments
+
+```tut:silent
+import _root_.enumeratum._
+
+object configuration {
+  sealed abstract class AppEnvironment extends EnumEntry
+  object AppEnvironment extends Enum[AppEnvironment] {
+    case object Local extends AppEnvironment
+    case object Testing extends AppEnvironment
+    case object Production extends AppEnvironment
+
+    val values = findValues
+  }
+}
+```
+
+---
+
+# Dealing with multiple environments
+
+```tut:silent
+import configuration._
+import ciris.enumeratum._
+
+val settings =
+  withValue(env[Option[AppEnvironment]]("APP_ENV")) {
+    case Some(AppEnvironment.Local) | None =>
+      loadConfig { HttpSettings("changeme", 10, 4000) }
+    case _ =>
+      loadConfig(
+        env[NonEmptyString]("API_KEY"),
+        prop[NonSystemPortNumber]("http.port")
+      ) { (apiKey, port) => HttpSettings(apiKey, 5, port) }
+  }
+```
+
+```tut:book
+show(settings)
+```
+
+---
+
+# Loading unary products and coproducts
+
+```tut:silent
+import ciris.generic._
+import shapeless.{:+:, CNil}
+
+type SystemPortNumber = Int Refined Interval.Closed[W.`0`.T, W.`1023`.T]
+final case class NonSystemPort(value: NonSystemPortNumber)
+final case class SystemPort(value: SystemPortNumber)
+final case class Port(value: NonSystemPort :+: SystemPort :+: CNil)
+
+final case class Settings(port: Port)
+
+val settings =
+  loadConfig(prop[Port]("http.port"))(Settings)
+```
+
+<br/>
+<br/>
+
+\* Also works with value classes
+
+---
+
+# Loading quantities with unit of measure
+
+```tut:silent
+import ciris.squants._
+import _root_.squants.energy.Power
+import _root_.squants.space.Area
+
+implicit val source =
+  ConfigSource.fromMap(ConfigKeyType("squants key")) {
+    Map("power" -> "12.0 kW", "area" -> "2.4 km²")
+  }
+```
+
+```tut:book
+show { loadConfig(read[Power]("power"))(identity) }
+
+show { loadConfig(read[Area]("area"))(identity) }
+```
+
+---
+
+class: center, middle
+
+<img src="images/try.gif" width="75%"></img>
+
+---
+
+# Summary
+
+* Configurations are typically associated with:  
+  boilerplate, mistakes, no tests, no validation
+
+* Use [PureConfig](https://github.com/pureconfig/pureconfig) to eliminate boilerplate code
+
+* Use [refined](https://github.com/fthomas/refined) to encode validation in data types
+
+* You can improve compile-time safety by writing as  
+  much as possible of your configurations in Scala
+
+* [Ciris](https://cir.is) is a library helping you to do so
+
+---
+
+class: center, middle
+
+# Questions?
+
+## Thanks!
+
+<h3 style="margin-bottom: 0;">Slides are available at:</h3>
+<h3 style="margin-top: 0;"><a href="https://vlovgr.github.io/refined-types">vlovgr.github.io/refined-types</a></h3>
+
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+    <script>
+      var slideshow = remark.create({
+        ratio: '16:9',
+        slideNumberFormat: '',
+        highlightStyle: 'monokai',
+        navigation: {
+          scroll: false
+        }
+      });
+    </script>
+  </body>
+</html>

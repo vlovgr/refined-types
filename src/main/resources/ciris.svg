@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<svg version="1.1" id="ciris" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 512 512" style="enable-background:new 0 0 512 512;" xml:space="preserve">
+  <polygon style="fill:#aab5bd;" points="54.612,272.968 0,327.583 109.184,327.583"/>
+  <polygon style="fill:#cdd3da;" points="457.388,424.758 512,370.099 402.819,370.099"/>
+  <polygon style="fill:#aab5bd;" points="474.199,407.867 512,445.683 512,370.099"/>
+  <g>
+    <polygon style="fill:#cdd3da;" points="206.359,272.968 54.612,272.968 206.359,424.758"/>
+    <polygon style="fill:#cdd3da;" points="206.359,173.642 313.62,280.916 313.62,66.317"/>
+  </g>
+  <polygon style="fill:#e6eaee;" points="206.359,424.758 457.388,424.758 206.359,173.642"/>
+</svg>
